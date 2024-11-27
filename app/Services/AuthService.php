@@ -41,20 +41,32 @@ class AuthService
     public static function decryptAuthData($jwt)
     {
         try {
-            if (!Cache::has($jwt)) {
-                $data = (array)JWT::decode($jwt, new Key(config('app.key'), 'HS256'));
-                if (!self::checkSession($data['id'], $data['session'])) return false;
-                $user = User::select([
-                    'id',
-                    'email',
-                    'is_admin',
-                    'is_staff'
-                ])
-                    ->find($data['id']);
-                if (!$user) return false;
-                Cache::put($jwt, $user->toArray(), 3600);
+            $userCache = Cache::get("USER_AUTH_CACHE", []);
+
+            if (isset($userCache[$jwt])) {
+                $jwtData = $userCache[$jwt];
+                if ($jwtData['expires_at'] < now()->timestamp) {
+                    unset($userCache[$jwt]);
+                    Cache::put("USER_AUTH_CACHE", $userCache, 3600);
+                } else {
+                    return $jwtData['user'];
+                }
             }
-            return Cache::get($jwt);
+
+            $data = (array)JWT::decode($jwt, new Key(config('app.key'), 'HS256'));
+            if (!self::checkSession($data['id'], $data['session'])) return false;
+    
+            $user = User::select(['id', 'email', 'is_admin', 'is_staff'])
+                ->find($data['id']);
+            if (!$user) return false;
+
+            $userCache[$jwt] = [
+                'user' => $user->toArray(),
+                'expires_at' => now()->addMinutes(60)->timestamp
+            ];
+
+            Cache::put("USER_AUTH_CACHE", $userCache, 3600);
+            return $user->toArray();
         } catch (\Exception $e) {
             return false;
         }
@@ -98,6 +110,15 @@ class AuthService
 
     public function removeAllSession()
     {
+        $userCache = Cache::get("USER_AUTH_CACHE", []);
+
+        foreach ($userCache as $jwt => $data) {
+            if (isset($data['user']['id']) && $data['user']['id'] == $this->user->id) {
+                unset($userCache[$jwt]);
+            }
+        }
+        Cache::put("USER_AUTH_CACHE", $userCache, 3600);
+
         $cacheKey = CacheKey::get("USER_SESSIONS", $this->user->id);
         return Cache::forget($cacheKey);
     }

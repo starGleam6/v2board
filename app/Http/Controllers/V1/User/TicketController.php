@@ -5,39 +5,42 @@ namespace App\Http\Controllers\V1\User;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\User\TicketSave;
 use App\Http\Requests\User\TicketWithdraw;
-use App\Models\Ticket;
-use App\Models\TicketMessage;
+use App\Jobs\SendTelegramJob;
 use App\Models\User;
+use App\Models\Plan;
 use App\Services\TelegramService;
 use App\Services\TicketService;
+use App\Models\Ticket;
+use App\Models\TicketMessage;
 use App\Utils\Dict;
-use Illuminate\Http\Request;
+use Illuminate\Http\Request; 
 use Illuminate\Support\Facades\DB;
 
 class TicketController extends Controller
 {
     public function fetch(Request $request)
     {
-        if ($request->input('id')) {
-            $ticket = Ticket::where('id', $request->input('id'))
-                ->where('user_id', $request->user['id'])
-                ->first();
-            if (!$ticket) {
-                abort(500, __('Ticket does not exist'));
-            }
+        $userId = $request->user['id'];
+        $ticketId = $request->input('id');
+    
+        if ($ticketId) {
+            $ticket = Ticket::where('id', $ticketId)
+                ->where('user_id', $userId)
+                ->firstOrFail();
+
             $ticket['message'] = TicketMessage::where('ticket_id', $ticket->id)->get();
             for ($i = 0; $i < count($ticket['message']); $i++) {
-                if ($ticket['message'][$i]['user_id'] == $ticket->user_id) {
+                if ($ticket['message'][$i]['user_id'] !== $ticket->user_id) {
                     $ticket['message'][$i]['is_me'] = true;
                 } else {
                     $ticket['message'][$i]['is_me'] = false;
                 }
             }
-            return response([
-                'data' => $ticket
-            ]);
+							 
+            return response(['data' => $ticket]);
+			   
         }
-        $ticket = Ticket::where('user_id', $request->user['id'])
+        $ticket = Ticket::where('user_id', $userId)
             ->orderBy('created_at', 'DESC')
             ->get();
         return response([
@@ -47,34 +50,30 @@ class TicketController extends Controller
 
     public function save(TicketSave $request)
     {
-        DB::beginTransaction();
-        if ((int)Ticket::where('status', 0)->where('user_id', $request->user['id'])->lockForUpdate()->count()) {
-            abort(500, __('There are other unresolved tickets'));
+        try {
+            DB::beginTransaction();
+            if ((int)Ticket::where('status', 0)->where('user_id', $request->user['id'])->lockForUpdate()->count()) {
+                throw new \Exception(__('There are other unresolved tickets'));
+            }
+															 
+            $ticketData = $request->only(['subject', 'level']) + ['user_id' => $request->user['id']];
+            $ticket = Ticket::create($ticketData);
+    
+            TicketMessage::create([
+                'user_id' => $request->user['id'],
+                'ticket_id' => $ticket->id,
+                'message' => $request->input('message')
+            ]);
+
+            DB::commit();
+            $this->sendNotify($ticket, $request->input('message'));
+            return response([
+                'data' => true
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            abort(500, $e->getMessage());
         }
-        $ticket = Ticket::create(array_merge($request->only([
-            'subject',
-            'level'
-        ]), [
-            'user_id' => $request->user['id']
-        ]));
-        if (!$ticket) {
-            DB::rollback();
-            abort(500, __('Failed to open ticket'));
-        }
-        $ticketMessage = TicketMessage::create([
-            'user_id' => $request->user['id'],
-            'ticket_id' => $ticket->id,
-            'message' => $request->input('message')
-        ]);
-        if (!$ticketMessage) {
-            DB::rollback();
-            abort(500, __('Failed to open ticket'));
-        }
-        DB::commit();
-        $this->sendNotify($ticket, $request->input('message'));
-        return response([
-            'data' => true
-        ]);
     }
 
     public function reply(Request $request)
@@ -98,14 +97,16 @@ class TicketController extends Controller
             abort(500, __('Please wait for the technical enginneer to reply'));
         }
         $ticketService = new TicketService();
-        if (!$ticketService->reply(
-            $ticket,
-            $request->input('message'),
-            $request->user['id']
-        )) {
+        if (
+			!$ticketService->reply(
+				$ticket,
+				$request->input('message'),
+				$request->user['id']
+			)
+		) {
             abort(500, __('Ticket reply failed'));
         }
-        $this->sendNotify($ticket, $request->input('message'));
+        $this->sendNotify($ticket, $request->input('message'), $request->user['id']);
         return response([
             'data' => true
         ]);
@@ -144,13 +145,15 @@ class TicketController extends Controller
         if ((int)config('v2board.withdraw_close_enable', 0)) {
             abort(500, 'user.ticket.withdraw.not_support_withdraw');
         }
-        if (!in_array(
-            $request->input('withdraw_method'),
-            config(
-                'v2board.commission_withdraw_method',
-                Dict::WITHDRAW_METHOD_WHITELIST_DEFAULT
-            )
-        )) {
+        if (
+			!in_array(
+				$request->input('withdraw_method'),
+				config(
+					'v2board.commission_withdraw_method',
+					Dict::WITHDRAW_METHOD_WHITELIST_DEFAULT	 
+				)
+			)
+		) {
             abort(500, __('Unsupported withdrawal method'));
         }
         $user = User::find($request->user['id']);
@@ -169,7 +172,8 @@ class TicketController extends Controller
             DB::rollback();
             abort(500, __('Failed to open ticket'));
         }
-        $message = sprintf("%s\r\n%s",
+        $message = sprintf(
+			"%s\r\n%s",
             __('Withdrawal method') . "：" . $request->input('withdraw_method'),
             __('Withdrawal account') . "：" . $request->input('withdraw_account')
         );
@@ -189,9 +193,59 @@ class TicketController extends Controller
         ]);
     }
 
-    private function sendNotify(Ticket $ticket, string $message)
+    private function sendNotify(Ticket $ticket, string $message, $userid = null)
+	{
+		$telegramService = new TelegramService();
+		if (!empty($userid)) {
+			$user = User::find($userid);
+			
+			if ($user) {
+				$transfer_enable = $this->getFlowData($user->transfer_enable); // 总流量
+				$remaining_traffic = $this->getFlowData($user->transfer_enable - $user->u - $user->d); // 剩余流量
+				$u = $this->getFlowData($user->u); // 上传
+				$d = $this->getFlowData($user->d); // 下载
+				$expired_at = date("Y-m-d h:m:s", $user->expired_at); // 到期时间
+				if (isset($_SERVER['HTTP_X_REAL_IP'])) {
+				$ip_address = $_SERVER['HTTP_X_REAL_IP'];
+				} elseif (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+					$ip_address = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])[0];
+				} else {
+					$ip_address = $_SERVER['REMOTE_ADDR'];
+				}
+				
+				$api_url = "http://ip-api.com/json/{$ip_address}?fields=520191&lang=zh-CN";
+				$response = file_get_contents($api_url);
+				$user_location = json_decode($response, true);
+				if ($user_location && $user_location['status'] === 'success') {
+					$location =  $user_location['city'] . ", " . $user_location['country'];
+				} else {
+					$location =  "无法确定用户地址";
+				}
+				
+				$plan = Plan::where('id', $user->plan_id)->first();
+				$planName = $plan ? $plan->name : '未找到套餐信息'; // Check if plan data is available
+				
+				$money = $user->balance / 100;
+				$affmoney = $user->commission_balance / 100;
+				$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n邮箱：\n`{$user->email}`\n用户位置：\n`{$location}`\nIP:\n{$ip_address}\n套餐与流量：\n`{$planName} of {$transfer_enable}/{$remaining_traffic}`\n上传/下载：\n`{$u}/{$d}`\n到期时间：\n`{$expired_at}`\n余额/佣金余额：\n`{$money}/{$affmoney}`\n主题：\n`{$ticket->subject}`\n内容：\n`{$message}`", true);
+			} else {
+				// Handle case where user data is not found
+				$telegramService->sendMessageWithAdmin("User data not found for user ID: {$userid}", true);
+			}
+		} else {
+			$telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n主题：\n`{$ticket->subject}`\n内容：\n`{$message}`", true);
+		}
+	}
+
+    private function getFlowData($b)
     {
-        $telegramService = new TelegramService();
-        $telegramService->sendMessageWithAdmin("📮工单提醒 #{$ticket->id}\n———————————————\n主题：\n`{$ticket->subject}`\n内容：\n`{$message}`", true);
+        $g = $b / (1024 * 1024 * 1024); // 转换流量数据
+        $m = $b / (1024 * 1024);
+        if ($g >= 1) {
+            $text = round($g, 2) . "GB";
+        } else {
+            $text = round($m, 2) . "MB";
+        }
+        return $text;
     }
 }

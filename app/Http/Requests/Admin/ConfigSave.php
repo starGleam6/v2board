@@ -7,6 +7,11 @@ use Illuminate\Foundation\Http\FormRequest;
 class ConfigSave extends FormRequest
 {
     const RULES = [
+        // deposit
+        'deposit_bounus' => [
+            'nullable',
+            'array',
+        ],
         // invite & commission
         'invite_force' => 'in:0,1',
         'invite_commission' => 'integer',
@@ -29,7 +34,7 @@ class ConfigSave extends FormRequest
         'app_description' => '',
         'app_url' => 'nullable|url',
         'subscribe_url' => 'nullable',
-        'subscribe_path' => 'nullable',
+        'subscribe_path' => 'nullable|regex:/^\\//',
         'try_out_enable' => 'in:0,1',
         'try_out_plan_id' => 'integer',
         'try_out_hour' => 'numeric',
@@ -48,6 +53,7 @@ class ConfigSave extends FormRequest
         'server_token' => 'nullable|min:16',
         'server_pull_interval' => 'integer',
         'server_push_interval' => 'integer',
+        'device_limit_mode' => 'in:0,1',
         // frontend
         'frontend_theme' => '',
         'frontend_theme_sidebar' => 'nullable|in:dark,light',
@@ -99,7 +105,16 @@ class ConfigSave extends FormRequest
      */
     public function rules()
     {
-        return self::RULES;
+        $rules = self::RULES;
+
+        $rules['deposit_bounus'][] = function ($attribute, $value, $fail) {
+            foreach ($value as $tier) {
+                if (!preg_match('/^\d+(\.\d+)?:\d+(\.\d+)?$/', $tier)) {
+                    $fail('充值奖励格式不正确，必须为充值金额:奖励金额');
+                }
+            }
+        };
+        return $rules;
     }
 
     public function messages()
@@ -108,12 +123,13 @@ class ConfigSave extends FormRequest
         return [
             'app_url.url' => '站点URL格式不正确，必须携带http(s)://',
             'subscribe_url.url' => '订阅URL格式不正确，必须携带http(s)://',
+            'subscribe_path.regex' => '订阅路径必须以/开头',
             'server_token.min' => '通讯密钥长度必须大于16位',
             'tos_url.url' => '服务条款URL格式不正确，必须携带http(s)://',
             'telegram_discuss_link.url' => 'Telegram群组地址必须为URL格式，必须携带http(s)://',
             'logo.url' => 'LOGO URL格式不正确，必须携带https(s)://',
             'secure_path.min' => '后台路径长度最小为8位',
-            'secure_path.regex' => '后台路径只能为字母或数字'
+            'secure_path.regex' => '后台路径只能为字母或数字',
         ];
     }
 }

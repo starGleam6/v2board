@@ -200,18 +200,28 @@ class Loon
     
     public static function buildHysteria($password, $server)
     {
+
+        $parts = explode(",",$server['port']);
+        $firstPart = $parts[0];
+        if (strpos($firstPart, '-') !== false) {
+            $range = explode('-', $firstPart);
+            $firstPort = $range[0];
+        } else {
+            $firstPort = $firstPart;
+        }
+
         $config = [
             "{$server['name']}=hysteria2",
             "{$server['host']}",
-            "{$server['port']}",
+            "{$firstPort}",
             "password={$password}",
             "download-bandwidth={$server['up_mbps']}",
             $server['server_name'] ? "sni={$server['server_name']}" : "",
             // 'tfo=true', 
             'udp-relay=true'
         ];
-        if (!empty($server['allow_insecure'])) {
-            array_push($config, $server['allow_insecure'] ? 'skip-cert-verify=true' : 'skip-cert-verify=false');
+        if (!empty($server['insecure'])) {
+            array_push($config, $server['insecure'] ? 'skip-cert-verify=true' : 'skip-cert-verify=false');
         }
         $config = array_filter($config);
         $uri = implode(',', $config);

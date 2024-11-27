@@ -9,6 +9,7 @@ use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
+use App\Models\User;
 
 class UniProxyController extends Controller
 {
@@ -43,19 +44,6 @@ class UniProxyController extends Controller
         $users = $this->serverService->getAvailableUsers($this->nodeInfo->group_id);
         $users = $users->toArray();
 
-        $users = array_map(function ($user) {
-            if ($user['device_limit'] == null || $user['device_limit'] <= 0) {
-                return $user;
-            }
-            $ips_array = Cache::get('ALIVE_IP_USER_'. $user['id']);
-            $count = 0;
-            if ($ips_array) {
-                $count = $ips_array['alive_ip'];
-            }
-            $user['alive_ip'] = $count;
-            return $user;
-        }, $users);
-
         $response['users'] = $users;
 
         $eTag = sha1(json_encode($response));
@@ -71,6 +59,12 @@ class UniProxyController extends Controller
     {
         $data = request()->getContent() ?: json_encode($_POST);
         $data = json_decode($data, true);
+        if ($data === null && json_last_error() !== JSON_ERROR_NONE) {
+            // JSON decoding error
+            return response([
+                'error' => 'Invalid traffic data'
+            ], 400);
+        }
         Cache::put(CacheKey::get('SERVER_' . strtoupper($this->nodeType) . '_ONLINE_USER', $this->nodeInfo->id), count($data), 3600);
         Cache::put(CacheKey::get('SERVER_' . strtoupper($this->nodeType) . '_LAST_PUSH_AT', $this->nodeInfo->id), time(), 3600);
         $userService = new UserService();
@@ -79,6 +73,32 @@ class UniProxyController extends Controller
         return response([
             'data' => true
         ]);
+    }
+
+    // 后端获取在线数据
+    public function alivelist(Request $request)
+    {
+        $userService = new UserService();
+        $users = $userService->getDeviceLimitedUsers();
+        if ($users->isEmpty()) {
+            return response()->json(['alive' => (object)[]]);        }
+        $cacheKeys = [];
+        foreach ($users as $user) {
+            $cacheKeys['ALIVE_IP_USER_' . $user->id] = $user->id;
+        }
+
+        $alive = Cache::remember('ALIVE_LIST', 60, function () use ($cacheKeys) {
+            $alive = [];
+            $ips_arrays = Cache::many(array_keys($cacheKeys));
+
+            foreach ($ips_arrays as $key => $data) {
+                if ($data && isset($data['alive_ip'])) {
+                    $alive[$cacheKeys[$key]] = $data['alive_ip'];
+                }
+            }
+            return $alive;
+        });
+        return response()->json(['alive' => (object)$alive]);
     }
 
     // 后端提交在线数据
@@ -92,36 +112,38 @@ class UniProxyController extends Controller
                 'error' => 'Invalid online data'
             ], 400);
         }
-
+        $updateAt = time();
         foreach ($data as $uid => $ips) {
-            $updateAt = time();
-            $oldips_array = Cache::get('ALIVE_IP_USER_'. $uid) ?? [];
-
+            $ips_array = Cache::get('ALIVE_IP_USER_'. $uid) ?? [];
             // 更新节点数据
-            $oldips_array[$this->nodeType . $this->nodeId] = ['aliveips' => $ips, 'lastupdateAt' => $updateAt];
-            // 删除过期节点在线数据
-            $expired_array = [];
-            foreach($oldips_array as $nodetypeid => $oldips) {
-                if (is_int($oldips)) {
-                    continue;
-                }
-                if ($updateAt - $oldips['lastupdateAt'] > 120){
-                    $expired_array[$nodetypeid] = '';
-                }
-            }
-            // 清理过期数据并存回缓存
-            $new_array = array_diff_key($oldips_array, $expired_array);
+            $ips_array[$this->nodeType . $this->nodeId] = ['aliveips' => $ips, 'lastupdateAt' => $updateAt];
+            // 清理过期数据
+            foreach($ips_array as $nodetypeid => $oldips) { 
+                if (!is_int($oldips) && ($updateAt - $oldips['lastupdateAt'] > 100)) { 
+                    unset($ips_array[$nodetypeid]); 
+                } 
+            } 
             $count = 0;
-            foreach($new_array as $nodetypeid => $newdata) {
-                if (is_int($newdata)) {
-                    continue;
+            if (config('v2board.device_limit_mode', 0) == 1) {
+                $ipmap = [];
+                foreach($ips_array as $nodetypeid => $newdata) {
+                    if (!is_int($newdata) && isset($newdata['aliveips'])) {
+                        foreach($newdata['aliveips'] as $ip_NodeId) {
+                            $ip = explode("_", $ip_NodeId)[0];
+                            $ipmap[$ip] = 1;
+                        }
+                    }
                 }
-                foreach($newdata['aliveips'] as $newip) {
-                    $count++;
+                $count = count($ipmap);
+            } else {
+                foreach($ips_array as $nodetypeid => $newdata) {
+                    if (!is_int($newdata) && isset($newdata['aliveips'])) {
+                        $count += count($newdata['aliveips']);
+                    }
                 }
             }
-            $new_array['alive_ip'] = $count;
-            Cache::put('ALIVE_IP_USER_'. $uid, $new_array, 120);
+            $ips_array['alive_ip'] = $count;
+            Cache::put('ALIVE_IP_USER_'. $uid, $ips_array, 120);
         }
 
         return response([
