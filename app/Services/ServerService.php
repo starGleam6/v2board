@@ -10,6 +10,8 @@ use App\Models\ServerVless;
 use App\Models\User;
 use App\Models\ServerVmess;
 use App\Models\ServerTrojan;
+use App\Models\ServerTuic;
+use App\Models\ServerAnytls;
 use App\Utils\CacheKey;
 use App\Utils\Helper;
 use Illuminate\Support\Facades\Cache;
@@ -91,6 +93,25 @@ class ServerService
         return $servers;
     }
 
+    public function getAvailableTuic(User $user)
+    {
+        $availableServers = [];
+        $model = ServerTuic::orderBy('sort', 'ASC');
+        $servers = $model->get()->keyBy('id');
+        foreach ($servers as $key => $v) {
+            if (!$v['show']) continue;
+            $servers[$key]['type'] = 'tuic';
+            $servers[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_TUIC_LAST_CHECK_AT', $v['id']));
+            if (!in_array($user->group_id, $v['group_id'])) continue;
+            if (isset($servers[$v['parent_id']])) {
+                $servers[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_TUIC_LAST_CHECK_AT', $v['parent_id']));
+                $servers[$key]['created_at'] = $servers[$v['parent_id']]['created_at'];
+            }
+            $availableServers[] = $servers[$key]->toArray();
+        }
+        return $availableServers;
+    }
+
     public function getAvailableHysteria(User $user)
     {
         $availableServers = [];
@@ -128,7 +149,34 @@ class ServerService
                 $shadowsocks[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_SHADOWSOCKS_LAST_CHECK_AT', $v['parent_id']));
                 $shadowsocks[$key]['created_at'] = $shadowsocks[$v['parent_id']]['created_at'];
             }
+            if ($v['obfs'] === 'http') {
+                $shadowsocks[$key]['obfs'] = 'http';
+                $shadowsocks[$key]['obfs-host'] = $v['obfs_settings']['host'];
+                $shadowsocks[$key]['obfs-path'] = $v['obfs_settings']['path'];
+            }
             $servers[] = $shadowsocks[$key]->toArray();
+        }
+        return $servers;
+    }
+
+    public function getAvailableAnyTLS(User $user)
+    {
+        $servers = [];
+        $model = ServerAnytls::orderBy('sort', 'ASC');
+        $anytls = $model->get()->keyBy('id');
+        foreach ($anytls as $key => $v) {
+            if (!$v['show']) continue;
+            $anytls[$key]['type'] = 'anytls';
+            $anytls[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_ANYTLS_LAST_CHECK_AT', $v['id']));
+            if (!in_array($user->group_id, $v['group_id'])) continue;
+            if (strpos($v['port'], '-') !== false) {
+                $anytls[$key]['port'] = Helper::randomPort($v['port']);
+            }
+            if (isset($anytls[$v['parent_id']])) {
+                $anytls[$key]['last_check_at'] = Cache::get(CacheKey::get('SERVER_ANYTLS_LAST_CHECK_AT', $v['parent_id']));
+                $anytls[$key]['created_at'] = $anytls[$v['parent_id']]['created_at'];
+            }
+            $servers[] = $anytls[$key]->toArray();
         }
         return $servers;
     }
@@ -139,8 +187,10 @@ class ServerService
             $this->getAvailableShadowsocks($user),
             $this->getAvailableVmess($user),
             $this->getAvailableTrojan($user),
+            $this->getAvailableTuic($user),
             $this->getAvailableHysteria($user),
-            $this->getAvailableVless($user)
+            $this->getAvailableVless($user),
+            $this->getAvailableAnyTLS($user)
         );
         $tmp = array_column($servers, 'sort');
         array_multisort($tmp, SORT_ASC, $servers);
@@ -250,6 +300,17 @@ class ServerService
         return $servers;
     }
 
+    public function getAllTuic()
+    {
+        $servers = ServerTuic::orderBy('sort', 'ASC')
+            ->get()
+            ->toArray();
+        foreach ($servers as $k => $v) {
+            $servers[$k]['type'] = 'tuic';
+        }
+        return $servers;
+    }
+
     public function getAllHysteria()
     {
         $servers = ServerHysteria::orderBy('sort', 'ASC')
@@ -257,6 +318,20 @@ class ServerService
             ->toArray();
         foreach ($servers as $k => $v) {
             $servers[$k]['type'] = 'hysteria';
+        }
+        return $servers;
+    }
+
+    public function getAllAnyTLS()
+    {
+        $servers = ServerAnytls::orderBy('sort', 'ASC')
+            ->get()
+            ->toArray();
+        foreach ($servers as $k => $v) {
+            $servers[$k]['type'] = 'anytls';
+            if (isset($v['padding_scheme'])) {
+                $servers[$k]['padding_scheme'] = json_encode($v['padding_scheme']);
+            }
         }
         return $servers;
     }
@@ -284,8 +359,10 @@ class ServerService
             $this->getAllShadowsocks(),
             $this->getAllVMess(),
             $this->getAllTrojan(),
+            $this->getAllTuic(),
             $this->getAllHysteria(),
-            $this->getAllVLess()
+            $this->getAllVLess(),
+            $this->getAllAnyTLS()
         );
         $this->mergeData($servers);
         $tmp = array_column($servers, 'sort');
@@ -314,10 +391,14 @@ class ServerService
                 return ServerShadowsocks::find($serverId);
             case 'trojan':
                 return ServerTrojan::find($serverId);
+            case 'tuic':
+                return ServerTuic::find($serverId);
             case 'hysteria':
                 return ServerHysteria::find($serverId);
             case 'vless':
                 return ServerVless::find($serverId);
+            case 'anytls':
+                return ServerAnytls::find($serverId);
             default:
                 return false;
         }

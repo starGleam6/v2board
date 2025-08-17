@@ -2,6 +2,7 @@
 
 namespace App\Protocols;
 
+use App\Utils\Helper;
 use Symfony\Component\Yaml\Yaml;
 
 class Stash
@@ -25,8 +26,8 @@ class Stash
         header('profile-update-interval: 24');
         header("content-disposition: filename*=UTF-8''".rawurlencode($appName));
         // 暂时使用clash配置文件，后续根据Stash更新情况更新
-        $defaultConfig = base_path() . '/resources/rules/default.clash.yaml';
-        $customConfig = base_path() . '/resources/rules/custom.clash.yaml';
+        $defaultConfig = base_path() . '/resources/rules/default.stash.yaml';
+        $customConfig = base_path() . '/resources/rules/custom.stash.yaml';
         if (\File::exists($customConfig)) {
             $config = Yaml::parseFile($customConfig);
         } else {
@@ -36,14 +37,7 @@ class Stash
         $proxies = [];
 
         foreach ($servers as $item) {
-            if ($item['type'] === 'shadowsocks'
-                && in_array($item['cipher'], [
-                    'aes-128-gcm',
-                    'aes-192-gcm',
-                    'aes-256-gcm',
-                    'chacha20-ietf-poly1305'
-                ])
-            ) {
+            if ($item['type'] === 'shadowsocks') {
                 array_push($proxy, self::buildShadowsocks($user['uuid'], $item));
                 array_push($proxies, $item['name']);
             }
@@ -57,6 +51,10 @@ class Stash
             }
             if ($item['type'] === 'trojan') {
                 array_push($proxy, self::buildTrojan($user['uuid'], $item));
+                array_push($proxies, $item['name']);
+            }
+            if ($item['type'] === 'tuic') {
+                array_push($proxy, self::buildTuic($user['uuid'], $item));
                 array_push($proxies, $item['name']);
             }
             if ($item['type'] === 'hysteria') {
@@ -98,16 +96,35 @@ class Stash
         return $yaml;
     }
 
-    public static function buildShadowsocks($uuid, $server)
+    public static function buildShadowsocks($password, $server)
     {
+        if ($server['cipher'] === '2022-blake3-aes-128-gcm') {
+            $serverKey = Helper::getServerKey($server['created_at'], 16);
+            $userKey = Helper::uuidToBase64($password, 16);
+            $password = "{$serverKey}:{$userKey}";
+        } elseif ($server['cipher'] === '2022-blake3-aes-256-gcm') {
+            $serverKey = Helper::getServerKey($server['created_at'], 32);
+            $userKey = Helper::uuidToBase64($password, 32);
+            $password = "{$serverKey}:{$userKey}";
+        }
         $array = [];
         $array['name'] = $server['name'];
         $array['type'] = 'ss';
         $array['server'] = $server['host'];
         $array['port'] = $server['port'];
         $array['cipher'] = $server['cipher'];
-        $array['password'] = $uuid;
+        $array['password'] = $password;
         $array['udp'] = true;
+        if (isset($server['obfs']) && $server['obfs'] === 'http') {
+            $array['plugin'] = 'obfs';
+            $plugin_opts = [
+                'mode' => 'http',
+            ];
+            if (isset($server['obfs-host']) && !empty($server['obfs-host'])) {
+                $plugin_opts['host'] = $server['obfs-host'];
+            }
+            $array['plugin-opts'] = $plugin_opts;
+        }
         return $array;
     }
 
@@ -138,7 +155,6 @@ class Stash
             if (isset($tcpSettings['header']['type']) && $tcpSettings['header']['type'] == 'http') {
                 $array['network'] = $tcpSettings['header']['type'];
                 if (isset($tcpSettings['header']['request']['headers']['Host'])) $array['http-opts']['headers']['Host'] = $tcpSettings['header']['request']['headers']['Host'];
-                if (isset($tcpSettings['header']['request']['path'][0])) $array['http-opts']['path'] = $tcpSettings['header']['request']['path'][0];
             }
         }
         if ($server['network'] === 'ws') {
@@ -154,6 +170,9 @@ class Stash
                     $array['ws-path'] = $wsSettings['path'];
                 if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
                     $array['ws-headers'] = ['Host' => $wsSettings['headers']['Host']];
+                if (isset($wsSettings['security'])) {
+                    $array['cipher'] = $wsSettings['security'];
+                }
             }
         }
         if ($server['network'] === 'grpc') {
@@ -176,10 +195,7 @@ class Stash
         $array['server'] = $server['host'];
         $array['port'] = $server['port'];
         $array['uuid'] = $uuid;
-        $array['flow'] = (function($value){
-            return in_array($value, [null, 'none', 'xtls-rprx-origin','xtls-rprx-direct','xtls-rprx-splice'], true) ? $value : null;
-        })($server['flow'] ?? null);
-        $array['client-fingerprint'] = 'chrome';
+        $array['flow'] = $server['flow'] ?? null;
         $array['udp'] = true;
 
         if ($server['tls']) {
@@ -193,6 +209,8 @@ class Stash
                    $array['reality-opts']['public-key'] = $tlsSettings['public_key'];
                    $array['reality-opts']['short-id'] = $tlsSettings['short_id'];
                 }
+                $array['skip-cert-verify'] = $tlsSettings['allow_insecure'] ? true : false;
+                $array['client-fingerprint'] = $tlsSettings['fingerprint'] ?? null;
             }
         }
 
@@ -259,6 +277,30 @@ class Stash
         };
         if (!empty($server['server_name'])) $array['sni'] = $server['server_name'];
         if (!empty($server['allow_insecure'])) $array['skip-cert-verify'] = ($server['allow_insecure'] ? true : false);
+        return $array;
+    }
+
+    public static function buildTuic($password, $server)
+    {
+        $array = [
+            'name' => $server['name'],
+            'type' => 'tuic',
+            'server' => $server['host'],
+            'port' => $server['port'],
+            'version' => 5,
+            'uuid' => $password,
+            'password' => $password,
+            'alpn' => ['h3'],
+            //'disable-sni' => $server['disable_sni'] ? true : false,
+            //'reduce-rtt' => $server['zero_rtt_handshake'] ? true : false,
+            //'udp-relay-mode' => $server['udp_relay_mode'] ?? 'native',
+            //congestion-controller' => $server['congestion_control'] ?? 'cubic',
+            'skip-cert-verify' => $server['insecure'] ? true : false,
+        ];
+        if (isset($server['server_name'])) {
+            $array['sni'] = $server['server_name'];
+        }
+
         return $array;
     }
 

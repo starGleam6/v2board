@@ -13,6 +13,7 @@ class ConfigSave extends FormRequest
             'array',
         ],
         // invite & commission
+        'ticket_status' => 'in:0,1,2',
         'invite_force' => 'in:0,1',
         'invite_commission' => 'integer',
         'invite_gen_limit' => 'integer',
@@ -45,10 +46,13 @@ class ConfigSave extends FormRequest
         'plan_change_enable' => 'in:0,1',
         'reset_traffic_method' => 'in:0,1,2,3,4',
         'surplus_enable' => 'in:0,1',
+        'allow_new_period' => 'in:0,1',
         'new_order_event_id' => 'in:0,1',
         'renew_order_event_id' => 'in:0,1',
         'change_order_event_id' => 'in:0,1',
         'show_info_to_server_enable' => 'in:0,1',
+        'show_subscribe_method' => 'in:0,1,2',
+        'show_subscribe_expire' => 'nullable|integer',
         // server
         'server_token' => 'nullable|min:16',
         'server_pull_interval' => 'integer',
@@ -110,6 +114,9 @@ class ConfigSave extends FormRequest
         $rules['deposit_bounus'][] = function ($attribute, $value, $fail) {
             foreach ($value as $tier) {
                 if (!preg_match('/^\d+(\.\d+)?:\d+(\.\d+)?$/', $tier)) {
+                    if($tier == '') {
+                        continue;
+                    }
                     $fail('充值奖励格式不正确，必须为充值金额:奖励金额');
                 }
             }

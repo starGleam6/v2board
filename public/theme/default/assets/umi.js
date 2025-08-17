@@ -1042,7 +1042,7 @@
                     href: "hiddify://import/" + e + "&flag=sing" + "#" + window.settings.title
                 }), t.push({
                     title: "Sing-box",
-                    href: "sing-box://import-remote-profile?url=" + encodeURIComponent(e + "&flag=sing-box") + "#" + window.settings.title
+                    href: "sing-box://import-remote-profile?url=" + encodeURIComponent(e) + "#" + window.settings.title
                 }), (Object(u["i"])() || Object(u["j"])()) && (t.push({
                     title: "Shadowrocket",
                     href: "shadowrocket://add/sub://" + window.btoa(e + "&flag=shadowrocket").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") + "?remark=" + window.settings.title
@@ -15930,8 +15930,40 @@
                                 id: "\u91cd\u7f6e\u6210\u529f"
                             })),
                             e.fetchData())
-                        }
-                        )
+                        })
+                    },
+                    onCancel() {},
+                    okText: Object(m["formatMessage"])({
+                        id: "\u786e\u8ba4"
+                    }),
+                    cancelText: Object(m["formatMessage"])({
+                        id: "\u53d6\u6d88"
+                    })
+                })
+            }
+            unbindTelegram() {
+                var e = this;
+                s["a"].confirm({
+                    title: Object(m["formatMessage"])({
+                        id: "\u786e\u5b9a\u8981\u89e3\u9664\u7ed1\u5b9aTelegram\uff1f"
+                    }),
+                    content: Object(m["formatMessage"])({
+                        id: "\u5982\u679c\u4f60\u7684Telegram ID\u5df2\u5931\u6548\u53ef\u4ee5\u8fdb\u884c\u6b64\u64cd\u4f5c\u3002\u91cd\u7f6e\u540e\u4f60\u9700\u8981\u91cd\u65b0\u8fdb\u884c\u7ed1\u5b9a\u3002"
+                    }),
+                    onOk() {
+                        Object(d["a"])("/user/unbindTelegram").then(t=>{
+                            if(200 === t.code) {
+                                c["a"].success(Object(m["formatMessage"])({
+                                    id: "\u91cd\u7f6e\u6210\u529f"
+                                }));
+                                e.props.dispatch({
+                                    type: "user/getUserInfo"
+                                });
+                                e.props.dispatch({
+                                    type: "user/getSubscribe"
+                                });
+                            }
+                        });
                     },
                     onCancel() {},
                     okText: Object(m["formatMessage"])({
@@ -16015,7 +16047,7 @@
                     }
                 }, Object(m["formatMessage"])({
                     id: "\u81ea\u52a8\u7eed\u8d39"
-                }), l.a.createElement(i["a"], {
+                }), " ", l.a.createElement(i["a"], {
                     loading: this.props.user.auto_renewal_loading,
                     checked: t.auto_renewal,
                     onChange: e=>this.update("auto_renewal", e ? 1 : 0)
@@ -16156,7 +16188,7 @@
                     className: "row mb-3 mb-md-0"
                 }, l.a.createElement("div", {
                     className: "col-md-12"
-                }, r.is_telegram ? l.a.createElement("div", {
+                }, r.is_telegram ? (!t.telegram_id ? l.a.createElement("div", {
                     className: "block block-rounded bind_telegram"
                 }, l.a.createElement("div", {
                     className: "block-header block-header-default"
@@ -16171,7 +16203,26 @@
                     className: "btn btn-primary btn-sm btn-primary btn-rounded px-3"
                 }, Object(m["formatMessage"])({
                     id: "\u7acb\u5373\u5f00\u59cb"
-                })))))) : l.a.createElement(l.a.Fragment, null), r.telegram_discuss_link ? l.a.createElement("div", {
+                })))))) : l.a.createElement("div", {
+                    className: "block block-rounded unbind_telegram"
+                }, l.a.createElement("div", {
+                    className: "block-header block-header-default"
+                }, l.a.createElement("h3", {
+                    className: "block-title"
+                }, Object(m["formatMessage"])({
+                    id: "\u7ed1\u5b9aTelegram"
+                })), l.a.createElement("div", {
+                    className: "block-options"
+                }, l.a.createElement(a["a"], {
+                    type: "danger",
+                    onClick: ()=>this.unbindTelegram()
+                }, Object(m["formatMessage"])({
+                    id: "\u89e3\u9664\u7ed1\u5b9a"
+                })))), l.a.createElement("div", {
+                    className: "block-options"
+                }, Object(m["formatMessage"])({
+                    id: "Telegram ID: " + String(t.telegram_id)
+                })))) : l.a.createElement(l.a.Fragment, null), r.telegram_discuss_link ? l.a.createElement("div", {
                     className: "block block-rounded join_telegram_disscuss"
                 }, l.a.createElement("div", {
                     className: "block-header block-header-default"
@@ -16206,7 +16257,9 @@
                 }, l.a.createElement("div", {
                     className: "alert alert-warning mb-3",
                     role: "alert"
-                }, "\u5f53\u4f60\u7684\u8ba2\u9605\u5730\u5740\u6216\u8d26\u6237\u53d1\u751f\u6cc4\u6f0f\u88ab\u4ed6\u4eba\u6ee5\u7528\u65f6\uff0c\u53ef\u4ee5\u5728\u6b64\u91cd\u7f6e\u8ba2\u9605\u4fe1\u606f\u3002\u907f\u514d\u5e26\u6765\u4e0d\u5fc5\u8981\u7684\u635f\u5931\u3002"), l.a.createElement(a["a"], {
+                }, Object(m["formatMessage"])({
+                    id: "\u91cd\u7f6e\u8ba2\u9605\u63d0\u793a\u4fe1\u606f"
+                })), l.a.createElement(a["a"], {
                     type: "danger",
                     onClick: ()=>this.resetSecurity()
                 }, Object(m["formatMessage"])({
@@ -17192,7 +17245,7 @@
           , u = s.host
           , l = document.createElement("link");
         if (l.rel = "stylesheet",
-        l.href = u ? "./theme/".concat(c.color, ".css") : "./theme/default/assets/theme/".concat(c.color, ".css"),
+        l.href = u ? "./theme/".concat(c.color, ".css") : "/theme/default/assets/theme/".concat(c.color, ".css"),
         document.getElementsByTagName("head")[0].appendChild(l),
         Object(i["e"])("i18n"))
             Object(o["setLocale"])(Object(i["e"])("i18n"));
@@ -30859,8 +30912,33 @@
                     }
                 })
             }
+            newPeriod() {
+                var e = this.props.user.subscribe
+                  , t = this;
+                c["a"].confirm({
+                    maskClosable: !0,
+                    title: Object(b["formatMessage"])({
+                        id: "\u786e\u5b9a\u5f00\u542f\u4e0b\u4e00\u4e2a\u6d41\u91cf\u5468\u671f\uff1f"
+                    }),
+                    content: Object(b["formatMessage"])({
+                        id: "\u70b9\u51fb\u300c\u786e\u5b9a\u300d\u5c06\u4f1a\u6263\u9664\u5f53\u524d\u6d41\u91cf\u5468\u671f\u5269\u4f59\u8ba2\u9605\u65f6\u957f\uff08\u6309\u6708\u91cd\u7f6e\u65f6\u6263\u9664\u672c\u5468\u671f\u5269\u4f59\u8ba2\u9605\u65f6\u957f\uff0c\u6bcf\u6708\u0031\u53f7\u91cd\u7f6e\u65f6\u6263\u9664\u6574\u6708\u65f6\u95f4\u0033\u0030\u5929\uff0c\u5e74\u5468\u671f\u540c\u7406\uff09\uff0c\u7cfb\u7edf\u5c06\u4f1a\u91cd\u7f6e\u60a8\u7684\u5df2\u4f7f\u7528\u6d41\u91cf\u3002"
+                    }),
+                    onOk() {
+                        t.props.dispatch({
+                            type: "user/newPeriod"
+                        })
+                    },
+                    onCancel() {},
+                    okText: Object(b["formatMessage"])({
+                        id: "\u786e\u5b9a"
+                    }),
+                    cancelText: Object(b["formatMessage"])({
+                        id: "\u53d6\u6d88"
+                    })
+                })
+            }
             render() {
-                var e, t, n, r, s = this.props.user, u = s.stat, d = s.subscribe, m = this.props.notice.notices, y = Object(p["f"])(d.u + d.d, d.transfer_enable), x = [];
+                var e, t, n, r, s = this.props.user, u = s.stat, d = s.subscribe, m = this.props.notice.notices, y = Math.round(Object(p["f"])(d.u + d.d, d.transfer_enable) * 100) / 100, x = [];
                 (void 0 !== u[0] && u[0] && x.push(l.a.createElement("div", {
                     className: "alert alert-danger",
                     role: "alert"
@@ -30889,7 +30967,7 @@
                 }, Object(b["formatMessage"])({
                     id: "\u7acb\u5373\u67e5\u770b"
                 }))))),
-                y >= 80 && !Object(p["h"])(d.expired_at)) && x.push(l.a.createElement("div", {
+                y >= 80 && y < 100 && !Object(p["h"])(d.expired_at)) && x.push(l.a.createElement("div", {
                     className: "alert alert-info",
                     role: "alert"
                 }, l.a.createElement("p", {
@@ -30900,7 +30978,7 @@
                     rate: y
                 }), " ", (null === (r = d.plan) || void 0 === r ? void 0 : r.reset_price) && l.a.createElement("a", {
                     onClick: ()=>this.resetPackage()
-                }, l.a.createElement("strong", null, "\u91cd\u7f6e\u5df2\u7528\u6d41\u91cf")))));
+                }, l.a.createElement("strong", null, "\u8d2d\u4e70\u6d41\u91cf\u91cd\u7f6e\u5305")))));
                 return l.a.createElement(f["a"], o()({}, this.props, {
                     title: Object(b["formatMessage"])({
                         id: "\u4eea\u8868\u76d8"
@@ -30997,8 +31075,15 @@
                     type: "primary",
                     onClick: ()=>this.resetPackage()
                 }, Object(b["formatMessage"])({
-                    id: "\u91cd\u7f6e\u5df2\u7528\u6d41\u91cf"
-                }))), Object(p["h"])(d.expired_at) && l.a.createElement("div", {
+                    id: "\u8d2d\u4e70\u6d41\u91cf\u91cd\u7f6e\u5305"
+                }))), d.allow_new_period && y >= 100 && !Object(p["h"])(d.expired_at) ? l.a.createElement("div", {
+                    className: "mb-4"
+                }, l.a.createElement(i["a"], {
+                    type: "primary",
+                    onClick: ()=>this.newPeriod()
+                }, Object(b["formatMessage"])({
+                    id: "\u63d0\u524d\u5f00\u542f\u6d41\u91cf\u5468\u671f"
+                }))) : "", Object(p["h"])(d.expired_at) && l.a.createElement("div", {
                     className: "mb-4"
                 }, l.a.createElement(i["a"], {
                     type: "primary",
@@ -44530,6 +44615,8 @@
                 getUserInfoLoading: !1,
                 changePasswordLoading: !1,
                 resetSecurityLoading: !1,
+                newPeriodLoading: !1,
+                unbindTelegramLoading: !1,
                 events: []
             },
             reducers: {
@@ -44755,6 +44842,54 @@
                                     return n.stop()
                                 }
                         }, n)
+                    })()
+                },
+                newPeriod(e, t) {
+                    return p().mark(function e() {
+                        var n, o;
+                        return p().wrap(function(e) {
+                            while (1)
+                                switch (e.prev = e.next) {
+                                case 0:
+                                    return n = t.put,
+                                    e.next = 3,
+                                    n({
+                                        type: "setState",
+                                        payload: {
+                                            newPeriodLoading: !0
+                                        }
+                                    });
+                                case 3:
+                                    return e.next = 5,
+                                    Object(a["b"])("/user/newPeriod");
+                                case 5:
+                                    return o = e.sent,
+                                    e.next = 8,
+                                    n({
+                                        type: "setState",
+                                        payload: {
+                                            newPeriodLoading: !1
+                                        }
+                                    });
+                                case 8:
+                                    if (200 === o.code) {
+                                        e.next = 9;
+                                        break
+                                    }
+                                    return e.abrupt("return");
+                                case 9:
+                                    return e.next = 10,
+                                    n({
+                                        type: "user/getSubscribe"
+                                    });
+                                case 10:
+                                    r["a"].success("\u63d0\u524d\u5f00\u542f\u6d41\u91cf\u5468\u671f\u6210\u529f"),
+                                    c.a.push("/dashboard");
+                                case 11:
+                                case "end":
+                                    return e.stop()
+                                }
+                        }, e)
                     })()
                 },
                 redeemgiftcard(e, t) {
@@ -52825,11 +52960,11 @@
                         }), Object(w["formatMessage"])({
                             id: "\u5df2\u5173\u95ed"
                         })) : m.a.createElement("span", null, m.a.createElement(f["a"], {
-                            status: parseInt(e) ? "error" : "processing"
+                            status: parseInt(e) ? "processing" : "error"
                         }), parseInt(e) ? Object(w["formatMessage"])({
-                            id: "\u5f85\u56de\u590d"
+                            id: "\u5df2\u7b54\u590d"
                         }) : Object(w["formatMessage"])({
-                            id: "\u5df2\u56de\u590d"
+                            id: "\u5f85\u5904\u7406"
                         }))
                     }
                 }, {

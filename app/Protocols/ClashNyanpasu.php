@@ -52,6 +52,14 @@ class ClashNyanpasu
                 array_push($proxy, self::buildTrojan($user['uuid'], $item));
                 array_push($proxies, $item['name']);
             }
+            if ($item['type'] === 'tuic') {
+                array_push($proxy, self::buildTuic($user['uuid'], $item));
+                array_push($proxies, $item['name']);
+            }
+            if ($item['type'] === 'anytls') {
+                array_push($proxy, self::buildAnyTLS($user['uuid'], $item));
+                array_push($proxies, $item['name']);
+            }
             if ($item['type'] === 'hysteria') {
                 array_push($proxy, self::buildHysteria($user['uuid'], $item));
                 array_push($proxies, $item['name']);
@@ -81,10 +89,10 @@ class ClashNyanpasu
         });
         $config['proxy-groups'] = array_values($config['proxy-groups']);
         // Force the current subscription domain to be a direct rule
-        $subsDomain = $_SERVER['HTTP_HOST'];
-        if ($subsDomain) {
-            array_unshift($config['rules'], "DOMAIN,{$subsDomain},DIRECT");
-        }
+        //$subsDomain = $_SERVER['HTTP_HOST'];
+        //if ($subsDomain) {
+        //    array_unshift($config['rules'], "DOMAIN,{$subsDomain},DIRECT");
+        //}
 
         $yaml = Yaml::dump($config, 2, 4, Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE);
         $yaml = str_replace('$app_name', config('v2board.app_name', 'V2Board'), $yaml);
@@ -111,6 +119,21 @@ class ClashNyanpasu
         $array['cipher'] = $server['cipher'];
         $array['password'] = $password;
         $array['udp'] = true;
+        if (isset($server['obfs']) && $server['obfs'] === 'http') {
+            $array['plugin'] = 'obfs';
+            $plugin_opts = [
+                'mode' => 'http'
+            ];
+            if (isset($server['obfs-host'])) {
+                $plugin_opts['host'] = $server['obfs-host'];
+            } else {
+                $plugin_opts['host'] = '';
+            }
+            if (isset($server['obfs-path'])) {
+                $plugin_opts['path'] = $server['obfs-path'];
+            }
+            $array['plugin-opts'] = $plugin_opts;
+        }
         return $array;
     }
 
@@ -222,15 +245,6 @@ class ClashNyanpasu
                 if (isset($grpcSettings['serviceName'])) $array['grpc-opts']['grpc-service-name'] = $grpcSettings['serviceName'];
             }
         }
-        if ($server['network'] === 'h2') {
-            $array['network'] = 'h2';
-            if ($server['network_settings']) {
-                $h2Settings = $server['network_settings'];
-                $array['h2-opts'] = [];
-                if (isset($h2Settings['host'])) $array['h2-opts']['host'] = array($h2Settings['host']);
-                if (isset($h2Settings['path'])) $array['h2-opts']['path'] = $h2Settings['path'];
-            }
-        }
 
         return $array;
     }
@@ -262,6 +276,53 @@ class ClashNyanpasu
         };
         if (!empty($server['server_name'])) $array['sni'] = $server['server_name'];
         if (!empty($server['allow_insecure'])) $array['skip-cert-verify'] = ($server['allow_insecure'] ? true : false);
+        return $array;
+    }
+
+    public static function buildTuic($password, $server)
+    {
+        $array = [
+            'name' => $server['name'],
+            'type' => 'tuic',
+            'server' => $server['host'],
+            'port' => $server['port'],
+            'uuid' => $password,
+            'password' => $password,
+            'alpn' => ['h3'],
+            'disable-sni' => $server['disable_sni'] ? true : false,
+            'reduce-rtt' => $server['zero_rtt_handshake'] ? true : false,
+            'udp-relay-mode' => $server['udp_relay_mode'] ?? 'native',
+            'congestion-controller' => $server['congestion_control'] ?? 'cubic',
+            'skip-cert-verify' => $server['insecure'] ? true : false,
+        ];
+        if (isset($server['server_name'])) {
+            $array['sni'] = $server['server_name'];
+        }
+
+        return $array;
+    }
+
+    public static function buildAnyTLS($password, $server)
+    {
+        $array = [
+            'name' => $server['name'],
+            'type' => 'anytls',
+            'server' => $server['host'],
+            'port' => $server['port'],
+            'password' => $password,
+            'client-fingerprint' => 'chrome',
+            'udp' => true,
+            'alpn' => [
+                'h2',
+                'http/1.1',
+            ],
+        ];
+        if (isset($server['server_name'])) {
+            $array['sni'] = $server['server_name'];
+        }
+        if ($server['insecure']) {
+            $array['skip-cert-verify'] = true;
+        }
         return $array;
     }
 

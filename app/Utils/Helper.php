@@ -1,6 +1,8 @@
 <?php
 
 namespace App\Utils;
+use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 
 class Helper
 {
@@ -97,15 +99,47 @@ class Helper
 
     public static function getSubscribeUrl($token)
     {
+        $submethod = (int)config('v2board.show_subscribe_method', 0);
         $path = config('v2board.subscribe_path', '/api/v1/client/subscribe');
         if (empty($path)) {
             $path = '/api/v1/client/subscribe';
         } 
-        $path = "{$path}?token={$token}";
         $subscribeUrls = explode(',', config('v2board.subscribe_url'));
         $subscribeUrl = $subscribeUrls[rand(0, count($subscribeUrls) - 1)];
-        if ($subscribeUrl) return $subscribeUrl . $path;
-        return url($path);
+        switch ($submethod) {
+            case 0:
+                $path = "{$path}?token={$token}";
+                if ($subscribeUrl) return $subscribeUrl . $path;
+                return url($path);
+                break;
+            case 1:
+                $newtoken = Cache::get("otp_{$token}");
+                if (!$newtoken) {
+                    $newtoken = self::base64EncodeUrlSafe(random_bytes(24));
+                    $added = Cache::add("otp_{$token}", $newtoken, 86400);
+                    if ($added) {
+                        Cache::put("otpn_{$newtoken}", $token, 86400);
+                    } else {
+                        $newtoken = Cache::get("otp_{$token}");
+                    }
+                }
+                $path = "{$path}?token={$newtoken}";
+                if ($subscribeUrl) return $subscribeUrl . $path;
+                return url($path);
+                break;
+            case 2:
+                $timestep = (int)config('v2board.show_subscribe_expire', 5) * 60;
+                $counter = floor(time() / $timestep);
+                $counterBytes = pack('N*', 0) . pack('N*', $counter);
+                $hash = hash_hmac('sha1', $counterBytes, $token, false);
+                $user = User::where('token', $token)->select('id')->first();
+                $newtoken = self::base64EncodeUrlSafe("{$user->id}:{$hash}");
+
+                $path = "{$path}?token={$newtoken}";
+                if ($subscribeUrl) return $subscribeUrl . $path;
+                return url($path);
+                break;
+        }
     }
 
     public static function randomPort($range) {
@@ -117,6 +151,16 @@ class Helper
     {
         $encoded = base64_encode($data);
         return str_replace(['+', '/', '='], ['-', '_', ''], $encoded);
+    }
+
+    public static function base64DecodeUrlSafe($data)
+    {
+        $b64 = str_replace(['-', '_'], ['+', '/'], $data);
+        $pad = 4 - (strlen($b64) % 4);
+        if ($pad < 4) {
+            $b64 .= str_repeat('=', $pad);
+        }
+        return base64_decode($b64);
     }
 
     public static function encodeURIComponent($str) {
@@ -164,7 +208,11 @@ class Helper
         $name = rawurlencode($server['name']);
         $str = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode("{$cipher}:{$password}"));
         $add = self::formatHost($server['host']);
-        return "ss://{$str}@{$add}:{$server['port']}#{$name}\r\n";
+        $uri = "ss://{$str}@{$add}:{$server['port']}";
+        if ($server['obfs'] == 'http') {
+            $uri .= "?plugin=obfs-local;obfs=http;obfs-host={$server['obfs-host']};path={$server['obfs-path']}";
+        }
+        return $uri."#{$name}\r\n";
     }
 
     public static function buildVmessUri($uuid, $server)
@@ -205,6 +253,7 @@ class Helper
             case 'ws':
                 $config['path'] = $networkSettings['path'] ?? null;
                 $config['host'] = $networkSettings['headers']['Host'] ?? null;
+                isset($networkSettings['security']) && $config['scy'] = $networkSettings['security'];
                 break;
     
             case 'grpc':
@@ -226,6 +275,8 @@ class Helper
             case 'xhttp':
                 $config['path'] = $networkSettings['path'] ?? null;
                 $config['host'] = $networkSettings['host'] ?? null;
+                $config['mode'] = $networkSettings['mode'] ?? 'auto';
+                $config['extra'] = isset($networkSettings['extra']) ? json_encode($networkSettings['extra'], JSON_UNESCAPED_SLASHES) : null;
                 break;
         }
 
@@ -244,13 +295,9 @@ class Helper
             "headerType" => "none",
             "quicSecurity" => "none",
             "serviceName" => "",
-            "mode" => "gun",
             "security" => $server['tls'] != 0 ? ($server['tls'] == 2 ? "reality" : "tls") : "",
             "flow" => $server['flow'],
             "fp" => $server['tls_settings']['fingerprint'] ?? 'chrome',
-            "sni" => "",
-            "pbk" => "",
-            "sid" => "",
         ];
 
         if ($server['tls']) {
@@ -306,14 +353,51 @@ class Helper
             "hysteria://{$remote}:{$firstPort}/?protocol=udp&auth={$password}&insecure={$server['insecure']}&peer={$server['server_name']}&upmbps={$server['down_mbps']}&downmbps={$server['up_mbps']}";
 
         if (isset($server['obfs']) && isset($server['obfs_password'])) {
+            $obfs_password = rawurlencode($server['obfs_password']);
             $uri .= $server['version'] == 2 ? 
-                "&obfs={$server['obfs']}&obfs-password={$server['obfs_password']}" :
-                "&obfs={$server['obfs']}&obfsParam{$server['obfs_password']}";
+                "&obfs={$server['obfs']}&obfs-password={$obfs_password}" :
+                "&obfs={$server['obfs']}&obfsParam{$obfs_password}";
         }
         if (count($parts) !== 1 || strpos($parts[0], '-') !== false) {
             $uri .= "&mport={$server['mport']}";
         }
         return "{$uri}#{$name}\r\n";
+    }
+
+    public static function buildTuicUri($password, $server)
+    {
+        $config = [
+            'sni' => $server['server_name'],
+            'alpn'=> 'h3',
+            'congestion_control' => $server['congestion_control'],
+            'allow_insecure' => $server['insecure'],
+            'disable_sni' => $server['disable_sni'],
+            'udp_relay_mode' => $server['udp_relay_mode'],
+        ];
+
+        $remote = self::formatHost($server['host']);
+        $port = $server['port'];
+        $name = self::encodeURIComponent($server['name']);
+
+        $query = http_build_query($config);
+        return "tuic://{$password}:{$password}@{$remote}:{$port}?{$query}#{$name}\r\n";
+    }
+
+    public static function buildAnytlsUri($password, $server)
+    {
+        $config = [
+            'insecure' => $server['insecure'],
+        ];
+        if (isset($server['server_name'])) {
+            $config['sni'] = $server['server_name'];
+        }
+
+        $remote = self::formatHost($server['host']);
+        $port = $server['port'];
+        $name = self::encodeURIComponent($server['name']);
+
+        $query = http_build_query($config);
+        return "anytls://{$password}@{$remote}:{$port}/?{$query}#{$name}\r\n";
     }
 
     public static function configureNetworkSettings($server, &$config)
@@ -333,9 +417,6 @@ class Helper
                 break;
             case 'kcp':
                 self::configureKcpSettings($settings, $config);
-                break;
-            case 'h2':
-                self::configureH2Settings($settings, $config);
                 break;
             case 'httpupgrade':
                 self::configureHttpupgradeSettings($settings, $config);
@@ -374,12 +455,6 @@ class Helper
             $config['seed'] = $settings['seed'];
         }
     }
-	
-    public static function configureH2Settings($settings, &$config)
-    {
-        $config['path'] = $settings['path'] ?? '';
-        $config['host'] = $settings['host'] ?? '';
-    }
 
     public static function configureHttpupgradeSettings($settings, &$config)
     {
@@ -391,5 +466,7 @@ class Helper
     {
         $config['path'] = $settings['path'] ?? '';
         $config['host'] = $settings['host'] ?? '';
+        $config['mode'] = $settings['mode'] ?? 'auto';
+        $config['extra'] = isset($settings['extra']) ? json_encode($settings['extra'], JSON_UNESCAPED_SLASHES) : null;
     }
 }

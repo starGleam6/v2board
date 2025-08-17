@@ -65,7 +65,7 @@ class Shadowrocket
                 if (isset($tcpSettings['header']['request']['path'][0]) && !empty($tcpSettings['header']['request']['path'][0]))
                     $config['path'] = $tcpSettings['header']['request']['path'][0];
                 if (isset($tcpSettings['header']['request']['headers']['Host'][0]))
-                    $config['obfs-host'] = $tcpSettings['header']['request']['headers']['Host'][0];
+                    $config['obfsParam'] = $tcpSettings['header']['request']['headers']['Host'][0];
             }
         }
         if ($server['network'] === 'ws') {
@@ -76,6 +76,8 @@ class Shadowrocket
                     $config['path'] = $wsSettings['path'];
                 if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
                     $config['obfsParam'] = $wsSettings['headers']['Host'];
+                if (isset($wsSettings['security']))
+                    $config['method'] = $wsSettings['security'];
             }
         }
         if ($server['network'] === 'grpc') {

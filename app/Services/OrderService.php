@@ -65,7 +65,7 @@ class OrderService
         }
         switch ((string)$order->period) {
             case 'onetime_price':
-                $this->buyByOneTime($plan);
+                $this->buyByOneTime($order, $plan);
                 break;
             case 'reset_price':
                 $this->buyByResetTraffic();
@@ -225,23 +225,28 @@ class OrderService
         if ($lastValidateAt === null) return;
     
         $expiredAtByOrder = strtotime("+{$orderMonthSum} month", $lastValidateAt);
-        if ($expiredAtByOrder < time()) return;
-        $orderSurplusSecond = $expiredAtByOrder - time();
+        $expiredAtByUser = $user->expired_at;
+        if ($expiredAtByOrder < time() || $expiredAtByUser < time()) return;
+        $orderSurplusSecond = $expiredAtByUser - time();
         $orderRangeSecond = $expiredAtByOrder - $lastValidateAt;
     
-        $totalTraffic = $user->transfer_enable / 1073741824;
-        $usedTraffic = ($user->u + $user->d) / 1073741824;
+        $totalTraffic = $user->transfer_enable;
+        $usedTraffic = ($user->u + $user->d);
         if ($totalTraffic == 0) return;
     
         $remainingTrafficRatio = ($totalTraffic - $usedTraffic) / $totalTraffic;
     
         $avgPricePerSecond = $orderAmountSum / $orderRangeSecond;
         if ($orderRangeSecond <= 31 * 86400) {
-            $orderSurplusAmount = $avgPricePerSecond * $orderSurplusSecond * $remainingTrafficRatio;
+            $remainingExpiredTimeRatio = $orderSurplusSecond / $orderRangeSecond;
+            $surplusRatio = min($remainingExpiredTimeRatio, $remainingTrafficRatio);
+            $orderSurplusAmount = $avgPricePerSecond * $orderSurplusSecond * $surplusRatio;
         } else {
-            $firstMonthSeconds = min($orderSurplusSecond, 30 * 86400);
-            $laterMonthsSeconds = $orderSurplusSecond - $firstMonthSeconds;
-            $orderSurplusAmount = $avgPricePerSecond * $firstMonthSeconds * $remainingTrafficRatio +
+            $monthSeconds = 30 * 86400;
+            $firstMonthRemainSeconds = $orderSurplusSecond % $monthSeconds;
+            $surplusRatio = min($firstMonthRemainSeconds / $monthSeconds, $remainingTrafficRatio);
+            $laterMonthsSeconds = $orderSurplusSecond - $firstMonthRemainSeconds;
+            $orderSurplusAmount = $avgPricePerSecond * $monthSeconds * $surplusRatio +
                                   $avgPricePerSecond * $laterMonthsSeconds;
         }
     
@@ -323,12 +328,14 @@ class OrderService
         $this->user->expired_at = $this->getTime($order->period, $this->user->expired_at);
     }
 
-    private function buyByOneTime(Plan $plan)
+    private function buyByOneTime(Order $order, Plan $plan)
     {
         $transfer_enable = $plan->transfer_enable;
-        $notUsedTraffic = ($this->user->transfer_enable - ($this->user->u + $this->user->d)) / 1073741824;
-        if ($notUsedTraffic > 0 && $this->user->expired_at == NULL) {
-            $transfer_enable += $notUsedTraffic;
+        if (!$order->surplus_order_ids) {
+            $notUsedTraffic = ($this->user->transfer_enable - ($this->user->u + $this->user->d)) / 1073741824;
+            if ($notUsedTraffic > 0 && $this->user->expired_at == NULL) {
+                $transfer_enable += $notUsedTraffic;
+            }
         }
         $this->buyByResetTraffic();
         $this->user->transfer_enable = $transfer_enable * 1073741824;

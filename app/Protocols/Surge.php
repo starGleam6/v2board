@@ -28,14 +28,7 @@ class Surge
         $proxyGroup = '';
 
         foreach ($servers as $item) {
-            if ($item['type'] === 'shadowsocks'
-                && in_array($item['cipher'], [
-                    'aes-128-gcm',
-                    'aes-192-gcm',
-                    'aes-256-gcm',
-                    'chacha20-ietf-poly1305'
-                ])
-            ) {
+            if ($item['type'] === 'shadowsocks') {
                 // [Proxy]
                 $proxies .= self::buildShadowsocks($user['uuid'], $item);
                 // [Proxy Group]
@@ -86,21 +79,39 @@ class Surge
         return $config;
     }
 
-
     public static function buildShadowsocks($password, $server)
     {
+        if ($server['cipher'] === '2022-blake3-aes-128-gcm') {
+            $serverKey = Helper::getServerKey($server['created_at'], 16);
+            $userKey = Helper::uuidToBase64($password, 16);
+            $password = "{$serverKey}:{$userKey}";
+        } elseif ($server['cipher'] === '2022-blake3-aes-256-gcm') {
+            $serverKey = Helper::getServerKey($server['created_at'], 32);
+            $userKey = Helper::uuidToBase64($password, 32);
+            $password = "{$serverKey}:{$userKey}";
+        }
         $config = [
             "{$server['name']}=ss",
-            "{$server['host']}",
-            "{$server['port']}",
-            "encrypt-method={$server['cipher']}",
-            "password={$password}",
-            'tfo=true',
-            'udp-relay=true'
         ];
-        $config = array_filter($config);
+        $config[] = $server['host'];
+        $config[] = $server['port'];
+        $config[] = "encrypt-method={$server['cipher']}";
+        $config[] = "password={$password}";
+
+        if (isset($server['obfs']) && $server['obfs'] === 'http') {
+            $config[] = "obfs={$server['obfs']}";
+            if (isset($server['obfs-host']) && !empty($server['obfs-host'])) {
+                $config[] = "obfs-host={$server['obfs-host']}";
+            }
+            if (isset($server['obfs-path'])) {
+                $config[] = "obfs-uri={$server['obfs-path']}";
+            }
+        }
+        $config[] = 'fast-open=false';
+        $config[] = 'udp=true';
         $uri = implode(',', $config);
         $uri .= "\r\n";
+
         return $uri;
     }
 
@@ -134,6 +145,8 @@ class Surge
                     array_push($config, "ws-path={$wsSettings['path']}");
                 if (isset($wsSettings['headers']['Host']) && !empty($wsSettings['headers']['Host']))
                     array_push($config, "ws-headers=Host:{$wsSettings['headers']['Host']}");
+                if (isset($wsSettings['security'])) 
+                    array_push($config, "encrypt-method={$wsSettings['security']}");
             }
         }
 
